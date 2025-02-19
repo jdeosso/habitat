@@ -8,18 +8,20 @@ import dask.dataframe as dd
 import dask.bag as db
 
 ####### variables
-file_habitat_sii_dolar = "/var/www/habitat/data/habitat-sii-dolar.jl"
-file_habitat_sii_uf = "/var/www/habitat/data/habitat-sii-uf.jl"
-file_aafm_comision = "/var/www/habitat/data/aafm-comision.jl"
+path = "/var/www/habitat"
+path = "."
+file_habitat_sii_dolar = path + "/data/habitat-sii-dolar.jl"
+file_habitat_sii_uf = path + "/data/habitat-sii-uf.jl"
+file_aafm_comision = path + "/data/aafm-comision.jl"
 file_habitat_comisiones_ahorro_voluntario = (
-    "/var/www/habitat/data/habitat-comisiones-ahorro-voluntario.jl"
+    path + "/data/habitat-comisiones-ahorro-voluntario.jl"
 )
-file_habitat_comisiones_apv = "/var/www/habitat/data/habitat-comisiones-apv.jl"
+file_habitat_comisiones_apv = path + "/data/habitat-comisiones-apv.jl"
 file_habitat_valores_cuota_multi_fondo = (
-    "/var/www/habitat/data/habitat-valores-cuota-multi-fondo.jl"
+    path + "/data/habitat-valores-cuota-multi-fondo.jl"
 )
-file_vc_fm = "/var/www/habitat/data/valor-cuota-fm/data/bpr-menu-*"
-file_precios = "/var/www/habitat/data/tabla-precios-"
+file_vc_fm = path + "/data/valor-cuota-fm/data/bpr-menu-*"
+file_precios = path + "/data/tabla-precios-"
 df_comicion_obli = pd.DataFrame(
     [
         ["CAPITAL-A", "Obl", "1.44"],
@@ -58,7 +60,6 @@ df_comicion_obli = pd.DataFrame(
 
 # lista = [ '2018']
 lista = list(range(2025, 2026))
-
 
 
 ###### lista multifondos
@@ -144,9 +145,8 @@ def ListaMultifondo_serie_APV(df_mutlifondop):
         df_afp_comi_apv11 = df_mutlifondop.copy()
         df_afp_comi_apv11["RUN"] = df_afp_comi_apv11["RUN"].astype(str) + "-" + x[0]
         df_afp_comi_apv11["Serie"] = "APV"
-        
-        frames = pd.concat([frames, df_afp_comi_apv11], ignore_index=True, sort=False)
 
+        frames = pd.concat([frames, df_afp_comi_apv11], ignore_index=True, sort=False)
 
     return frames
 
@@ -195,27 +195,34 @@ if __name__ == "__main__":
         now = datetime.now()
         now = now.replace(hour=0, minute=0, second=0, microsecond=0)
         if now.day < 15:
-            now = now - relativedelta(months=2)
+            now = now - relativedelta(months=1)
 
         f_str = now.strftime("%Y")
         file_vc_fm = file_vc_fm + f_str + ".jl"
 
-#        records = db.read_text(file_vc_fm).map(json.loads)
+        records = db.read_text(file_vc_fm).map(json.loads)
 
-        datetime.strptime("2018-01-01", "%Y-%m-%d").isoformat()
         ini = datetime.strptime("{}-01-01".format(lista[i]), "%Y-%m-%d")
         fin = datetime.strptime("{}-12-31".format(lista[i]), "%Y-%m-%d")
-        now = datetime.now()  - relativedelta(months=1)
+        #        now = datetime.now() - relativedelta(months=1)
         now = now.replace(hour=0, minute=0, second=0, microsecond=0)
         fin = now - timedelta(days=now.day)
         print(fin)
- #       records1 = records.filter(
-  #          lambda d: d["date"] >= ini.isoformat() and d["date"] <= fin.isoformat()
- #       )
- #       inbag = db.from_sequence(records1)
-        meta = pd.DataFrame({'RUN': [], 'Serie': [], "Valor cuota":[],  "date":[], "Moneda en que contabiliza el fondo":[]})
-     #   dd_fondosmutuos = inbag.to_dataframe(meta=meta)
-     #   df_fondosmutuos = dd_fondosmutuos.compute()
+        records1 = records.filter(
+            lambda d: d["date"] >= ini.isoformat() and d["date"] <= fin.isoformat()
+        )
+        inbag = db.from_sequence(records1)
+        meta = pd.DataFrame(
+            {
+                "RUN": pd.Series(dtype="string"),  # O usa dtype="object"
+                "Serie": pd.Series(dtype="string"),
+                "Valor cuota": pd.Series(dtype="float"),
+                "date": pd.Series(dtype="object"),
+                "Moneda en que contabiliza el fondo": pd.Series(dtype="string"),
+            }
+        )
+        dd_fondosmutuos = inbag.to_dataframe(meta=meta)
+        df_fondosmutuos = dd_fondosmutuos.compute()
 
         df_mutlifondo = df_mutlifondo_tot[
             (df_mutlifondo_tot["Fecha"] <= fin.isoformat())
@@ -264,53 +271,52 @@ if __name__ == "__main__":
         dd_multifondo4 = dd.from_pandas(df_multifondo4, npartitions=3)
         dd_multifondo4 = dd_multifondo4.rename(columns={"Serie_x": "Serie"})
         ##### vc fm
-   #     dd_fondosmutuos1 = dd_fondosmutuos.rename(
-  #          columns={
-  #              "serie": "Serie",
-  #              "Valor cuota": "valor_cuota",
-  #3              "date": "Fecha",
-   #             "Moneda en que contabiliza el fondo": "Moneda",
-   ##         }
-    #    )
+        dd_fondosmutuos1 = dd_fondosmutuos.rename(
+            columns={
+                "serie": "Serie",
+                "Valor cuota": "valor_cuota",
+                "date": "Fecha",
+                "Moneda en que contabiliza el fondo": "Moneda",
+            }
+        )
         ### salvo dd procesado
         ### convierto pd a dd
-##        dd_dolar = dd.from_pandas(df_dolar, npartitions=3)
-  #      dd_fondosmutuos1["Fecha"] = dd.to_datetime(dd_fondosmutuos1["Fecha"])
-  #      dd_fondosmutuos2 = dd.merge(
-  #          dd_fondosmutuos1, df_dolar, on=["Fecha"], how="left"
-  #      )
-  #      dd_fondosmutuos2["dolar"] = dd_fondosmutuos2.dolar.where(
-  #          dd_fondosmutuos2.Moneda == "DOLAR", 1
-  #      )
+        dd_dolar = dd.from_pandas(df_dolar, npartitions=3)
+        dd_fondosmutuos1["Fecha"] = dd.to_datetime(dd_fondosmutuos1["Fecha"])
+        dd_fondosmutuos2 = dd.merge(
+            dd_fondosmutuos1, df_dolar, on=["Fecha"], how="left"
+        )
+        dd_fondosmutuos2["dolar"] = dd_fondosmutuos2.dolar.where(
+            dd_fondosmutuos2.Moneda == "DOLAR", 1
+        )
         # np.where(dd_fondosmutuos2['Moneda'] =  = 'DOLAR',dd_fondosmutuos2['dolar'],1)
- #       dd_fondosmutuos2["run_fondo"] = (
- #           dd_fondosmutuos2["RUN"].astype(str).str[:4].astype(np.int64)
- #       )
- #       dd_fondosmutuos2["run_fondo"] = dd_fondosmutuos2["run_fondo"].astype(str)
- #       dd_fondosmutuos2["Serie"] = dd_fondosmutuos2["Serie"].astype(str)
- #       dd_fondosmutuos2["tipo_cambio"] = dd_fondosmutuos2["dolar"]
+        dd_fondosmutuos2["run_fondo"] = (
+            dd_fondosmutuos2["RUN"].astype(str).str[:4].astype(np.int64)
+        )
+        dd_fondosmutuos2["run_fondo"] = dd_fondosmutuos2["run_fondo"].astype(str)
+        dd_fondosmutuos2["Serie"] = dd_fondosmutuos2["Serie"].astype(str)
+        dd_fondosmutuos2["tipo_cambio"] = dd_fondosmutuos2["dolar"]
 
         ## exepcion
 
-#        dd_fondosmutuos2["Serie"] = dd_fondosmutuos2["Serie"].str.replace(
- #           "100.0", "100"
-  #      )
+        dd_fondosmutuos2["Serie"] = dd_fondosmutuos2["Serie"].str.replace(
+            "100.0", "100"
+        )
 
-#        dd_fondosmutuos_c = dd.from_pandas(df_fondosmutuos_c, npartitions=3)
-#        dd_fondosmutuos3 = dd.merge(
-#            dd_fondosmutuos2, dd_fondosmutuos_c, on=["run_fondo", "Serie"], how="left"
-#        )
-#        dd_fondosmutuos3 = dd_fondosmutuos3[
-#            ["RUN", "Serie", "valor_cuota", "Fecha", "uf", "tipo_cambio", "tac_total"]
-#        ]
+        dd_fondosmutuos_c = dd.from_pandas(df_fondosmutuos_c, npartitions=3)
+        dd_fondosmutuos3 = dd.merge(
+            dd_fondosmutuos2, dd_fondosmutuos_c, on=["run_fondo", "Serie"], how="left"
+        )
+        dd_fondosmutuos3 = dd_fondosmutuos3[
+            ["RUN", "Serie", "valor_cuota", "Fecha", "uf", "tipo_cambio", "tac_total"]
+        ]
 
         #### union dos         dd_result = dd_multifondo4.append(dd_fondosmutuos3)
-        #dd_result = dd.concat([dd_multifondo4, dd_fondosmutuos3], ignore_index=True, sort=False)
-        
-        df_result = dd_multifondo4.compute()  #dd_result.compute()
+        dd_result = dd.concat(
+            [dd_multifondo4, dd_fondosmutuos3], ignore_index=True, sort=False
+        )
 
-        df_result111 = df_result[(df_result["RUN"] == "HABITAT-A")]
-        df_result111 = df_result111[(df_result111["Serie"] == "Obl")]
+        df_result = dd_result.compute()
 
         ### comision obligatorio
         for index, row in df_comicion_obli.iterrows():
@@ -337,4 +343,3 @@ if __name__ == "__main__":
             print("{}{}-{}.csv".format(file_precios, row["RUN"], lista[i]))
             # df_result1.to_csv('{}{}-{}.csv'.format(file_precios, row['RUN'], lista[i]))
         i += 1
-
