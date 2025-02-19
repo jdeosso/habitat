@@ -2,7 +2,6 @@
 import re
 import os
 import json
-import boto3
 import sys
 import pandas as pd
 import numpy as np
@@ -19,28 +18,16 @@ import hashlib
 # lista=[['9192-8','APV-AP','100']]
 # periodo =12
 
-file_precio = "/var/www/habitat/data/tabla-precios-"
-file_tabla_rfrv = "/var/www/habitat/data/tabla-rfrv.csv"
-file_tabla_comision = "/var/www/habitat/data/estructura-de-comisiones.jl"
-file_tabla_tope = "/var/www/habitat/data/indicadores-previsionales.json"
+# File paths
+PRICE_TABLE_PATH = "/var/www/habitat/data/tabla-precios-"
+RFRV_TABLE_PATH = "/var/www/habitat/data/tabla-rfrv.csv"
+COMMISSION_STRUCTURE_PATH = "/var/www/habitat/data/estructura-de-comisiones.jl"
+PREVISIONAL_INDICATORS_PATH = "/var/www/habitat/data/indicadores-previsionales.json"
 
-
-def get_df(fname):
-    #  df=pd.dataframe()
-    #    sha1 = hashlib.sha1()
-    #    key = sha1.update(fname.encode('utf-8'))
-    #    key = sha1.hexdigest()[:10]
-    #    try:
-    #        cache_key = '{}.pkl'.format(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', key))
-    ##        if os.path.exists(cache_key):
-    ##            return pd.read_pickle(cache_key)
-    #    except:
-    #        pass
-    #
+def get_df(filename):
     try:
-
         df = pd.read_csv(
-            fname,
+            filename,
             dtype={"tipo_cambio": "float64"},
             usecols=[
                 "RUN",
@@ -52,11 +39,7 @@ def get_df(fname):
                 "tac_total",
             ],
         )
-
-    #       if os.path.exists(cache_key):
-    #            pd.to_pickle(df, cache_key)
     except:
-
         df = pd.DataFrame(
             columns=[
                 "RUN",
@@ -70,190 +53,183 @@ def get_df(fname):
         )
     return df
 
-
-def get_dataframes(lista, fnames):
+def get_dataframes(fund_list, filenames):
     pool = Pool()
 
-    df_lista = pd.DataFrame(lista)
-    df_lista = df_lista.rename(
+    df_fund_list = pd.DataFrame(fund_list)
+    df_fund_list = df_fund_list.rename(
         columns={0: "RUN", 1: "Serie", 2: "por", 3: "NombreFondo"}
     )
-    dd_lista = dd.from_pandas(df_lista, npartitions=3)
 
-    results = [pool.apply_async(get_df, args=(fname,)) for fname in fnames]
+    # Debugging print to check the structure of df_fund_list
+    print("Columns in df_fund_list:", df_fund_list.columns)
 
-    dd_precios = pd.concat([p.get() for p in results])
-    df_precios = pd.merge(
-        dd_precios, dd_lista.compute(), on=["RUN", "Serie"], how="inner"
+    dd_fund_list = dd.from_pandas(df_fund_list, npartitions=3)
+
+    results = [pool.apply_async(get_df, args=(filename,)) for filename in filenames]
+
+    dd_prices = pd.concat([p.get() for p in results])
+    df_prices = pd.merge(
+        dd_prices, dd_fund_list.compute(), on=["RUN", "Serie"], how="inner"
     )
 
-    return df_precios
+    return df_prices
 
-
-def get_filenames(lista, periodo):
-
-    if len(lista) == 0:
+def get_filenames(fund_list, period):
+    if len(fund_list) == 0:
         sys.exit()
 
-    i = 0
-    y = 0
-    ciclos = periodo / 12 + 2
-    fecha = datetime.utcnow()
-    if fecha.month == 1 or (fecha.day < 15 and fecha.month == 2):
-        fecha = fecha - relativedelta(months=1)
+    current_date = datetime.utcnow()
+    if current_date.month == 1 or (current_date.day < 15 and current_date.month == 2):
+        current_date = current_date - relativedelta(months=1)
 
-    f_str = int(fecha.strftime("%Y"))
-    items = []
-    for x in lista:
-        fname1 = "{}{}-".format(file_precio, x[0])
-        f_str = int(fecha.strftime("%Y"))
-        ciclos = periodo / 12 + 2
-        y = 0
-        while y < ciclos:
-            fname = fname1 + "{}.csv".format(f_str)
-            items.append(fname)
-            f_str = f_str - 1
-            y = y + 1
-            i = i + 1
+    year_str = int(current_date.strftime("%Y"))
+    cycles = period / 12 + 2
+    filenames = []
+    for fund in fund_list:
+        base_filename = f"{PRICE_TABLE_PATH}{fund[0]}-"
+        year_str = int(current_date.strftime("%Y"))
+        cycles = period / 12 + 2
+        for _ in range(int(cycles)):
+            filename = f"{base_filename}{year_str}.csv"
+            filenames.append(filename)
+            year_str -= 1
 
-    return items
+    return filenames
     ### extrae periodo y runs
 
 
 # df_precios, df_lista, monto, periodo, sueldo_bruto=df_precios_60, df_lista, monto, 12, sueldo_bruto
-def get_results(df_precios, df_lista, monto, periodo, sueldo_bruto):
-
-    # fechas
-    now = datetime.now()
-    now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+def get_results(df_prices, df_fund_list, amount, period, gross_salary):
+    now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     if now.day < 28:
         now = now - relativedelta(months=1)
-    mes_pasado = now - timedelta(days=now.day) - relativedelta(months=periodo)
+    last_month = now - timedelta(days=now.day) - relativedelta(months=period)
     now = now - timedelta(days=now.day)
 
-    df_precios = df_precios.drop_duplicates()
-    df_precios = df_precios[
-        (df_precios.Fecha >= datetime.strftime(mes_pasado, "%Y-%m-%d"))
+    df_prices = df_prices.drop_duplicates()
+    df_prices = df_prices[
+        (df_prices.Fecha >= datetime.strftime(last_month, "%Y-%m-%d"))
     ]
-    df_precios = df_precios[(df_precios.Fecha <= datetime.strftime(now, "%Y-%m-%d"))]
+    df_prices = df_prices[(df_prices.Fecha <= datetime.strftime(now, "%Y-%m-%d"))]
 
     ### arregla %
-    df_precios["por"] = df_precios["por"].astype(np.float64)
-    df_precios["uf"] = df_precios["uf"].astype(np.float64)
-    df_precios["valor_cuota"] = df_precios["valor_cuota"].astype(np.float64)
-    df_precios["tac_total"] = df_precios["tac_total"].apply(lambda x: str(x).replace(',', '.'))
-    df_precios["tac_total"] = df_precios["tac_total"].astype(np.float64)
-    df_precios_por = df_precios.groupby(["Fecha"]).agg({"por": "sum"})
-    df_precios_por = df_precios_por.reset_index(level=[0])
-    df_precios_por = df_precios_por.rename(columns={"por": "por_total"})
-    df_precios = pd.merge(df_precios, df_precios_por, on="Fecha", how="left")
-    df_precios["por"] = df_precios["por"] * 100 / df_precios["por_total"]
+    df_prices["por"] = df_prices["por"].astype(np.float64)
+    df_prices["uf"] = df_prices["uf"].astype(np.float64)
+    df_prices["valor_cuota"] = df_prices["valor_cuota"].astype(np.float64)
+    df_prices["tac_total"] = df_prices["tac_total"].apply(lambda x: str(x).replace(',', '.'))
+    df_prices["tac_total"] = df_prices["tac_total"].astype(np.float64)
+    df_prices_por = df_prices.groupby(["Fecha"]).agg({"por": "sum"})
+    df_prices_por = df_prices_por.reset_index(level=[0])
+    df_prices_por = df_prices_por.rename(columns={"por": "por_total"})
+    df_prices = pd.merge(df_prices, df_prices_por, on="Fecha", how="left")
+    df_prices["por"] = df_prices["por"] * 100 / df_prices["por_total"]
     #    df_precios['por'] = df_precios['por']*df_precios['por_total']/100
     ## separo comision de f con afp
-    df_precios["comision"] = np.where(
-        ((df_precios["RUN"].str.len()) == 6) | (df_precios["Serie"] == "Obl"),
+    df_prices["comision"] = np.where(
+        ((df_prices["RUN"].str.len()) == 6) | (df_prices["Serie"] == "Obl"),
         0,
-        df_precios["tac_total"],
+        df_prices["tac_total"],
     )
-    df_precios["valor_cuota_real"] = (
-        df_precios["valor_cuota"] * df_precios["tipo_cambio"]
+    df_prices["valor_cuota_real"] = (
+        df_prices["valor_cuota"] * df_prices["tipo_cambio"]
     )
-    df_precios = df_precios.sort_values(by=["RUN", "Serie", "Fecha"]).copy()
+    df_prices = df_prices.sort_values(by=["RUN", "Serie", "Fecha"]).copy()
 
-    df_precios["dias_mes"] = df_precios["Fecha"].apply(
+    df_prices["dias_mes"] = df_prices["Fecha"].apply(
         lambda x: calendar.monthrange(int(x[:4]), int(x[5:7]))[1]
     )
-    df_precios1 = df_precios.copy()
+    df_prices1 = df_prices.copy()
     ## volatilidad
-    df_precios_1 = df_precios.shift(1).copy()
-    df_precios["Rentabilidad"] = (
+    df_prices_1 = df_prices.shift(1).copy()
+    df_prices["Rentabilidad"] = (
         (
-            df_precios["valor_cuota_real"]
-            - df_precios["comision"]
+            df_prices["valor_cuota_real"]
+            - df_prices["comision"]
             / 100
-            * df_precios_1["valor_cuota_real"]
-            / df_precios["dias_mes"]
+            * df_prices_1["valor_cuota_real"]
+            / df_prices["dias_mes"]
         )
-        / df_precios_1["valor_cuota_real"]
-    ) / (df_precios["uf"] / df_precios_1["uf"]) - 1
+        / df_prices_1["valor_cuota_real"]
+    ) / (df_prices["uf"] / df_prices_1["uf"]) - 1
 
-    df_precios["Rentabilidad"] = np.where(
+    df_prices["Rentabilidad"] = np.where(
         np.logical_and(
-            df_precios["RUN"] == df_precios_1["RUN"],
-            df_precios["Serie"] == df_precios_1["Serie"],
+            df_prices["RUN"] == df_prices_1["RUN"],
+            df_prices["Serie"] == df_prices_1["Serie"],
         ),
-        df_precios["Rentabilidad"],
+        df_prices["Rentabilidad"],
         1,
     )
 
-    df_precios["Rentabilidad_pon"] = (
-        df_precios["Rentabilidad"] * df_precios["por"] / 100
+    df_prices["Rentabilidad_pon"] = (
+        df_prices["Rentabilidad"] * df_prices["por"] / 100
     )
-    df_rentabilidad = df_precios.groupby(["Fecha"]).agg({"Rentabilidad_pon": "sum"})
+    df_rentabilidad = df_prices.groupby(["Fecha"]).agg({"Rentabilidad_pon": "sum"})
     df_rentabilidad["Rentabilidad_pon"][0] = 0
     Volatilidad_cartera = df_rentabilidad.std(ddof=1) * math.sqrt(365)
-    df_precios["Rentabilidad"] = np.where(
-        df_precios["Fecha"] == datetime.strftime(mes_pasado, "%Y-%m-%d"),
+    df_prices["Rentabilidad"] = np.where(
+        df_prices["Fecha"] == datetime.strftime(last_month, "%Y-%m-%d"),
         0,
-        df_precios["Rentabilidad"],
+        df_prices["Rentabilidad"],
     )
-    Volatilidad = df_precios.groupby(["RUN", "Serie"])[["Rentabilidad"]].std(ddof=1)
+    Volatilidad = df_prices.groupby(["RUN", "Serie"])[["Rentabilidad"]].std(ddof=1)
     Volatilidad["Rentabilidad"] = Volatilidad["Rentabilidad"] * math.sqrt(365)
 
     ### rentabilidad mensual
-    df_dias = df_precios1["Fecha"].apply(
+    df_days = df_prices1["Fecha"].apply(
         lambda x: x[:7] + "-" + str(calendar.monthrange(int(x[:4]), int(x[5:7]))[1])
     )
-    df_dias = df_dias.drop_duplicates().copy()
-    df_dias = pd.DataFrame(df_dias)
-    df_precios1 = pd.merge(df_dias, df_precios1, on=["Fecha"], how="left")
-    df_precios1 = df_precios1.sort_values(by=["RUN", "Serie", "Fecha"]).copy()
-    df_precios1_1 = df_precios1.shift(1).copy()
-    df_precios1["Rentabilidad"] = (
+    df_days = df_days.drop_duplicates().copy()
+    df_days = pd.DataFrame(df_days)
+    df_prices1 = pd.merge(df_days, df_prices1, on=["Fecha"], how="left")
+    df_prices1 = df_prices1.sort_values(by=["RUN", "Serie", "Fecha"]).copy()
+    df_prices1_1 = df_prices1.shift(1).copy()
+    df_prices1["Rentabilidad"] = (
         (
-            df_precios1["valor_cuota_real"]
-            - df_precios1["comision"] / 100 * df_precios1_1["valor_cuota_real"] / 12
+            df_prices1["valor_cuota_real"]
+            - df_prices1["comision"] / 100 * df_prices1_1["valor_cuota_real"] / 12
         )
-        / df_precios1_1["valor_cuota_real"]
-    ) / (df_precios1["uf"] / df_precios1_1["uf"])
-    df_precios1["Rentabilidad"] = np.where(
+        / df_prices1_1["valor_cuota_real"]
+    ) / (df_prices1["uf"] / df_prices1_1["uf"])
+    df_prices1["Rentabilidad"] = np.where(
         np.logical_and(
-            df_precios1["RUN"] == df_precios1_1["RUN"],
-            df_precios1["Serie"] == df_precios1_1["Serie"],
+            df_prices1["RUN"] == df_prices1_1["RUN"],
+            df_prices1["Serie"] == df_prices1_1["Serie"],
         ),
-        df_precios1["Rentabilidad"],
+        df_prices1["Rentabilidad"],
         1,
     )
 
-    df_precios1["Rentabilidad_pon"] = (
-        df_precios1["Rentabilidad"] * df_precios1["por"].astype(np.float64) / 100
+    df_prices1["Rentabilidad_pon"] = (
+        df_prices1["Rentabilidad"] * df_prices1["por"].astype(np.float64) / 100
     )
     #### arregloo  problema pocentaje fondo meos datos
-    df_precios1_ag = pd.DataFrame()
-    df_precios1_ag["Fecha"] = np.where(
-        df_precios1["Rentabilidad_pon"].isnull(), df_precios1["Fecha"], "2001-01-01"
+    df_prices1_ag = pd.DataFrame()
+    df_prices1_ag["Fecha"] = np.where(
+        df_prices1["Rentabilidad_pon"].isnull(), df_prices1["Fecha"], "2001-01-01"
     )
-    df_precios1_ag = pd.merge(df_precios1_ag, df_precios1, on=["Fecha"], how="inner")
-    df_precios1_ag["por"] = np.where(
-        df_precios1_ag["Rentabilidad_pon"].isnull(),
+    df_prices1_ag = pd.merge(df_prices1_ag, df_prices1, on=["Fecha"], how="inner")
+    df_prices1_ag["por"] = np.where(
+        df_prices1_ag["Rentabilidad_pon"].isnull(),
         0,
-        df_precios1_ag["por"] * 100 / df_precios1_ag["por_total"],
+        df_prices1_ag["por"] * 100 / df_prices1_ag["por_total"],
     )
-    df_precios1_ag["por"] = np.where(
-        df_precios1_ag["Rentabilidad_pon"].isnull(),
+    df_prices1_ag["por"] = np.where(
+        df_prices1_ag["Rentabilidad_pon"].isnull(),
         0,
-        df_precios1_ag["por"] * 100 / df_precios1_ag["por"].sum(),
+        df_prices1_ag["por"] * 100 / df_prices1_ag["por"].sum(),
     )
 
-    df_precios1_ag["Rentabilidad_pon"] = (
-        df_precios1_ag["Rentabilidad"] * df_precios1_ag["por"].astype(np.float64) / 100
+    df_prices1_ag["Rentabilidad_pon"] = (
+        df_prices1_ag["Rentabilidad"] * df_prices1_ag["por"].astype(np.float64) / 100
     )
-    df_precios1_ag["Rentabilidad_pon"].fillna(0)
-    for index, row in df_precios1_ag.iterrows():
-        df_precios1 = df_precios1[(df_precios1["Fecha"] != row["Fecha"])]
+    df_prices1_ag["Rentabilidad_pon"].fillna(0)
+    for index, row in df_prices1_ag.iterrows():
+        df_prices1 = df_prices1[(df_prices1["Fecha"] != row["Fecha"])]
     # df_precios1 = df_precios1.append(df_precios1_ag)
-    df_precios1 = pd.concat((df_precios1,df_precios1_ag))
-    df_rentabilidad1 = df_precios1.groupby(["Fecha"]).agg({"Rentabilidad_pon": "sum"})
+    df_prices1 = pd.concat((df_prices1,df_prices1_ag))
+    df_rentabilidad1 = df_prices1.groupby(["Fecha"]).agg({"Rentabilidad_pon": "sum"})
     df_rentabilidad1["Rentabilidad_pon"][0] = 1
     rentabilidad_cartera = (
         math.pow(
@@ -264,17 +240,17 @@ def get_results(df_precios, df_lista, monto, periodo, sueldo_bruto):
     )
     ##### rentabilidad instrumentos
 
-    df_precios1["Rentabilidad"] = np.where(
-        df_precios1["Fecha"] == datetime.strftime(mes_pasado, "%Y-%m-%d"),
+    df_prices1["Rentabilidad"] = np.where(
+        df_prices1["Fecha"] == datetime.strftime(last_month, "%Y-%m-%d"),
         0,
-        df_precios1["Rentabilidad"],
+        df_prices1["Rentabilidad"],
     )
-    Rentabilidad_1 = df_precios1.groupby(["RUN", "Serie", "Fecha"]).agg(
+    Rentabilidad_1 = df_prices1.groupby(["RUN", "Serie", "Fecha"]).agg(
         {"Rentabilidad": "sum"}
     )
     Rentabilidad_12 = Rentabilidad_1.reset_index(level=[0, 1, 2])
     Rentabilidad_12["Rentabilidad"] = np.where(
-        Rentabilidad_12["Fecha"] == datetime.strftime(mes_pasado, "%Y-%m-%d"),
+        Rentabilidad_12["Fecha"] == datetime.strftime(last_month, "%Y-%m-%d"),
         1,
         Rentabilidad_12["Rentabilidad"],
     )
@@ -311,8 +287,8 @@ def get_results(df_precios, df_lista, monto, periodo, sueldo_bruto):
         i = i + 1
 
     ### comision
-    df_comision = df_precios[
-        (df_precios.Fecha == datetime.strftime(now, "%Y-%m-%d"))
+    df_comision = df_prices[
+        (df_prices.Fecha == datetime.strftime(now, "%Y-%m-%d"))
     ].copy()
     df_comision["tac_total"] = df_comision["tac_total"] / 100
     df_comision["comision_ponderada"] = (
@@ -323,15 +299,18 @@ def get_results(df_precios, df_lista, monto, periodo, sueldo_bruto):
     #########
     ### asset alocation
 
-    df_rf_rv = pd.read_csv(file_tabla_rfrv)
+    df_rf_rv = pd.read_csv(RFRV_TABLE_PATH)
 
-    df_lista["Run Fondo"] = df_lista["RUN"].apply(
+    df_fund_list["Run Fondo"] = df_fund_list["RUN"].apply(
         lambda x: x[: x.find("-")] if x[: x.find("-")].isdigit() else x
     )
-    df_rf_rv_1 = pd.merge(df_lista, df_rf_rv, on="Run Fondo", how="left")
+    df_rf_rv_1 = pd.merge(df_fund_list, df_rf_rv, on="Run Fondo", how="left")
 
-    df_rf_rv_1["por"] = df_rf_rv_1["por"].astype(np.float64)
-    df_rf_rv_1["por_ponderado"] = df_rf_rv_1["por"] * df_rf_rv_1["cantidad"] / 100
+    # Debugging print to check the structure of df_rf_rv_1
+    print("Columns in df_rf_rv_1:", df_rf_rv_1.columns)
+
+    df_rf_rv_1["Percentage"] = df_rf_rv_1["Percentage"].astype(np.float64)
+    df_rf_rv_1["por_ponderado"] = df_rf_rv_1["Percentage"] * df_rf_rv_1["cantidad"] / 100
     df_rf_rv_2 = df_rf_rv_1.groupby(["RVRF", "Asset"]).agg({"por_ponderado": "sum"})
     df_rf_rv_cartera = df_rf_rv_2.reset_index(level=[0, 1])
     df_rf_rv_3 = df_rf_rv_1.groupby(["RUN", "Serie", "RVRF", "Asset"]).agg(
@@ -346,37 +325,56 @@ def get_results(df_precios, df_lista, monto, periodo, sueldo_bruto):
     Costo_com = 0
     df_renta2 = df_rentabilidad1.copy()
     df_renta2 = df_renta2[(df_renta2["Rentabilidad_pon"] != 0)]
-    if df_lista["Serie"][0] == "Obl":
-        df_comision = pd.read_json(file_tabla_comision, lines=True)
-        df_tope = pd.read_json(file_tabla_tope, lines=True)
+    if df_fund_list["Serie"][0] == "Obl":
+        df_comision = pd.read_json(COMMISSION_STRUCTURE_PATH, lines=True)
+        df_tope = pd.read_json(PREVISIONAL_INDICATORS_PATH, lines=True)
 
-        if int(df_tope["tope_imponible_pesos"][0]) < int(sueldo_bruto):
-            sueldo_bruto = df_tope["tope_imponible_pesos"][0]
-        apote_afp = round(int(sueldo_bruto) * 0.1, 0)
-        fondo_obl = df_lista["RUN"][0]
+        if int(df_tope["tope_imponible_pesos"][0]) < int(gross_salary):
+            gross_salary = df_tope["tope_imponible_pesos"][0]
+        apote_afp = round(int(gross_salary) * 0.1, 0)
+        fondo_obl = df_fund_list["RUN"][0]
         fondo_obl = fondo_obl.split("-", 1)[0].lower()
         df_comision = df_comision[(df_comision["afp"] == fondo_obl)]
 
         df_comision = df_comision[
-            (df_comision.fecha >= datetime.strftime(mes_pasado, "%Y-%m-%d"))
+            (df_comision.fecha >= datetime.strftime(last_month, "%Y-%m-%d"))
         ]
         df_comision = df_comision[
             (df_comision.fecha <= datetime.strftime(now, "%Y-%m-%d"))
         ]
         df_comision["Aporte"] = apote_afp
-        df_comision["Costo"] = int(sueldo_bruto) * (df_comision["comision"] / 100)
+        df_comision["Costo"] = int(gross_salary) * (df_comision["comision"] / 100)
         df_comision = df_comision.filter(["fecha", "Aporte", "Costo"])
         df_comision = df_comision.sort_values(by="fecha")
         df_renta2 = df_renta2.reset_index(drop=True)
         df_comision = df_comision.reset_index(drop=True)
+
+        # Debugging prints to check lengths
+        print("Length of df_renta2:", len(df_renta2))
+        print("Length of df_comision:", len(df_comision))
+
+        # Ensure both DataFrames have the same length
+        if len(df_renta2) != len(df_comision):
+            print("Warning: Length mismatch between df_renta2 and df_comision")
+            # Adjust df_renta2 to match the length of df_comision
+            if len(df_renta2) < len(df_comision):
+                # Reindex df_renta2 to match df_comision
+                df_renta2 = df_renta2.reindex(df_comision.index)
+                # Fill missing values in 'Aporte' and other necessary columns
+                df_renta2['Aporte'] = df_comision['Aporte']
+                df_renta2.fillna(0, inplace=True)
+            else:
+                # Trim df_renta2 to match df_comision
+                df_renta2 = df_renta2.iloc[:len(df_comision)]
+
+        # Set the index if lengths match
         df_renta2.index = df_comision.index
-        df_renta2["Aporte"] = df_comision["Aporte"]
+
+        # Debugging print to check df_renta2 content
+        print("df_renta2 after reindexing:", df_renta2)
 
         for index, row in df_renta2.iterrows():
-
-            aporte_valorado = (aporte_valorado + row["Aporte"]) * (
-                row["Rentabilidad_pon"]
-            )
+            aporte_valorado = (aporte_valorado + row["Aporte"]) * (row["Rentabilidad_pon"])
         aporte_valorado = int(aporte_valorado)
         Costo_com = df_comision["Costo"].sum()
 
@@ -398,19 +396,19 @@ def get_results(df_precios, df_lista, monto, periodo, sueldo_bruto):
     results["df_renta"] = json.loads(results["df_renta"])
     #### rentabilidad total
 
-    periodo = df_renta["renta"].count() - 1
-    r_T = df_renta["renta"][periodo]
+    period = df_renta["renta"].count() - 1
+    r_T = df_renta["renta"][period]
     results["rentabilidad_total"] = r_T
     ##### agergo saldo mensual obl
     results["retorno_sueldo"] = aporte_valorado
-    results["retorno_anual_mas_sueldo"] = aporte_valorado + r_T * monto + monto
+    results["retorno_anual_mas_sueldo"] = aporte_valorado + r_T * amount + amount
     results["costo_mensual"] = Costo_com
     #### retorno_anual  total
 
-    r_T = df_renta["renta"][periodo]
-    results["retorno_anual"] = r_T * monto + monto
+    r_T = df_renta["renta"][period]
+    results["retorno_anual"] = r_T * amount + amount
     # rentabilidad instrumentos
-    results["rentabilidad_122"] = Rentabilidad_122.to_json(None, orient="records")
+    results["rentabilidad_122"] = Rentabilidad_1.to_json(None, orient="records")
     results["rentabilidad_122"] = json.loads(results["rentabilidad_122"])
 
     # comision cartera
@@ -486,15 +484,19 @@ def get_results(df_precios, df_lista, monto, periodo, sueldo_bruto):
     )
     results["df_rf_rv_instrumentos"] = json.loads(results["df_rf_rv_instrumentos"])
 
-    results["fondos"] = df_lista.values.tolist()
-    results["periodo"] = periodo
+    results["fondos"] = df_fund_list.values.tolist()
+    results["periodo"] = period
 
     results["p1"] = {
         "x": results["volatilidad_cartera"] * 100,
         "y": results["rentabilidad_cartera"] * 100,
     }
 
-    results["nombre"] = list(df_lista["NombreFondo"])
+    # Ensure this is the correct DataFrame
+    print("df_fund_list content before accessing 'NombreFondo':", df_fund_list)
+
+    # Access the 'NombreFondo' column
+    results["nombre"] = list(df_fund_list["NombreFondo"])
 
     return results
 

@@ -7,69 +7,75 @@ import numpy as np
 import funciones as Fu
 
 
-#####inicio codigo
 if __name__ == "__main__":
-
     if len(sys.argv) < 2:
         sys.exit()
-        # data=json.loads('{"fondos":[["HABITAT-B","Obl",90,"HABITAT-B Obl"],["HABITAT-A","Obl",10,"HABITAT-A Obl"]],"periodo":60,"tipo"="Obl" ,"sexo":"Masculino","monto":"1000000","sueldo_bruto":"1000000","fecha_de_nacimiento":"24-01-1961","rut":"157153110","nombre_cliente":"Jorge","uuid":"c8053990-14e6-11e9-a769-afd8a955f14d","fecha":"2019-01-10T14:48:24.233Z"}')
-        # data=json.loads('{"fondos":[["CAPITAL-A","Obl","50","CAPITAL-A Obl"],["CAPITAL-B","Obl","50","CAPITAL-B Obl"]],"periodo":60,"sexo":"Masculino","tipo":"Obl","monto":"123452","sueldo_bruto":"1200000","fecha_de_nacimiento":"10-01-1979","rut":"157153110","nombre_cliente":"Jorge","uuid":"2fbec120-18d2-11e9-a4c6-5968886a5c50","fecha":"2019-01-15T14:31:03.474Z"}')
+
+    # Load data from command line argument
     data = json.loads(sys.argv[1])
-    lista = data["fondos"]
-    if len(lista) == 0:
+    fund_list = data["fondos"]
+    if len(fund_list) == 0:
         sys.exit()
 
-    periodo = data["periodo"]
-    if periodo is None:
+    period = data["periodo"]
+    if period is None:
         sys.exit()
 
-    monto = data["monto"]
-    if monto is None:
+    amount = data["monto"]
+    if amount is None:
         sys.exit()
-    monto = str(monto)
-    monto = re.sub(r"[^0-9]", "", monto)
-    monto = int(monto)
+    amount = str(amount)
+    amount = re.sub(r"[^0-9]", "", amount)
+    amount = int(amount)
 
-    rut = data["rut"]
-    if rut is None:
-        sys.exit()
-
-    sueldo_bruto = data["sueldo_bruto"]
-    if sueldo_bruto is None:
-        sys.exit()
-    tipo = data["tipo"]
-
-    nombre_cliente = data["nombre_cliente"]
-    if nombre_cliente is None:
+    client_rut = data["rut"]
+    if client_rut is None:
         sys.exit()
 
-    filenames60 = Fu.get_filenames(lista, 60)
-    df_precios_60 = Fu.get_dataframes(lista, filenames60)
+    gross_salary = data["sueldo_bruto"]
+    if gross_salary is None:
+        sys.exit()
+    fund_type = data["tipo"]
 
-    #    filenames36 = Fu.get_filenames(lista, 36)
-    #    df_precios_36 = Fu.get_dataframes(lista, filenames36)
-    #
-    #    filenames12 = Fu.get_filenames(lista, 12)
-    #    df_precios_12 = Fu.get_dataframes(lista, filenames12)
+    client_name = data["nombre_cliente"]
+    if client_name is None:
+        sys.exit()
 
-    df_lista = pd.DataFrame(lista)
-    df_lista = df_lista.rename(
-        columns={0: "RUN", 1: "Serie", 2: "por", 3: "NombreFondo"}
+    # Retrieve filenames and dataframes for the specified period
+    filenames_60 = Fu.get_filenames(fund_list, 60)
+    df_prices_60 = Fu.get_dataframes(fund_list, filenames_60)
+
+    # Create DataFrame from fund list
+    df_fund_list = pd.DataFrame(fund_list)
+    df_fund_list = df_fund_list.rename(
+        columns={0: "RUN", 1: "Serie", 2: "Percentage", 3: "FundName"}
     )
 
-    resultados12 = Fu.get_results(df_precios_60, df_lista, monto, 12, sueldo_bruto)
-    resultados36 = Fu.get_results(df_precios_60, df_lista, monto, 36, sueldo_bruto)
-    resultados60 = Fu.get_results(df_precios_60, df_lista, monto, 60, sueldo_bruto)
+    # Calculate results for different periods
+    results_12 = Fu.get_results(df_prices_60, df_fund_list, amount, 12, gross_salary)
+    results_36 = Fu.get_results(df_prices_60, df_fund_list, amount, 36, gross_salary)
+    results_60 = Fu.get_results(df_prices_60, df_fund_list, amount, 60, gross_salary)
 
-    res = Fu.objeto_final(
-        resultados12,
-        resultados36,
-        resultados60,
-        monto,
-        rut,
-        nombre_cliente,
-        lista,
-        tipo,
-        sueldo_bruto,
+    # Generate final result object
+    final_result = Fu.objeto_final(
+        results_12,
+        results_36,
+        results_60,
+        amount,
+        client_rut,
+        client_name,
+        fund_list,
+        fund_type,
+        gross_salary,
     )
-    print(json.dumps(res))
+
+    # Debugging print to check the structure of final_result
+    print("Final Result:", json.dumps(final_result, indent=2))
+
+    # Access the specific part of the result
+    rentabilidad_real_anualizada = final_result.get("rentabilidad_real_anualizada")
+    if rentabilidad_real_anualizada:
+        m12 = rentabilidad_real_anualizada.get("m12")
+        print("M12:", m12)
+    else:
+        print("Error: 'rentabilidad_real_anualizada' not found in the result.")
